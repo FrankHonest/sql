@@ -1,0 +1,18 @@
+WITH SEL AS(
+	SELECT 	
+	a.DB, 
+	a.SharePath,
+	a.LogPath AS LocalPath,
+	a.StandbyFile,
+	CASE WHEN (max(b.status) & 1024 = 1024 AND max(b.status) & 2097152 = 2097152) THEN 'N'  ELSE 'Y'END AS 'Broken',
+	CASE WHEN (Datepart(year, max(t.backup_finish_date)) =	Datepart(year, Getdate()) 
+	and Datepart(dayofyear, max(t.backup_finish_date)) = Datepart(dayofyear, Getdate()))
+	THEN 'N' ELSE 'Y' END AS 'NotActual',
+	max(t.backup_finish_date) AS backup_finish_date
+	FROM 
+		msdb.dbo.als_dest_databases a 
+		INNER JOIN master.dbo.sysdatabases b ON a.DB = b.name
+		LEFT JOIN msdb.dbo.backupset t ON a.DB = t.database_name AND t.type = 'L'
+	GROUP BY a.DB, a.SharePath, a.LogPath, a.StandbyFile
+) SELECT SUBSTRING(SUBSTRING(SEL.SharePath,3,LEN(SEL.SharePath)-3) ,1,CHARINDEX('\',SUBSTRING(SEL.SharePath,3,LEN(SEL.SharePath)-3),1)-1 ) AS SourceServer
+,DB,SharePath, LocalPath, StandbyFile, backup_finish_date AS LastBackupRestored   FROM SEL WHERE Broken ='N'

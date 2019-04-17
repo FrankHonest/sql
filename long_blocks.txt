@@ -1,0 +1,11 @@
+SELECT DISTINCT @@servername as [sqlservername],db_name(DTL.[resource_database_id]) as [database_name], 
+DOWT.wait_duration_ms/1000/60 as [Blocked_Time_in_Minutes], DOWT.session_id AS [blocked_session_id - VICTIM],  
+sp_blocked.[loginame] AS [blocked_user - VICTIM ], convert(nvarchar(4000),DEST_blocked.[text]) AS [blocked_command - VICTIM], 
+DOWT.blocking_session_id [Blocking_Session_id - CULPRIT ], sp_blocking.[loginame] AS [blocking_user - CULPRIT ],  
+convert(nvarchar(4000),DEST_blocking.[text]) AS [blocking_command - CULPRIT ], getdate() AS [Time_Captured]
+FROM sys.dm_tran_locks DTL  with (nolock) 
+INNER JOIN sys.dm_os_waiting_tasks DOWT with (nolock) ON DTL.lock_owner_address = DOWT.resource_address    
+INNER JOIN sys.sysprocesses sp_blocked  with (nolock) ON DOWT.[session_id] = sp_blocked.[spid] 
+INNER JOIN sys.sysprocesses sp_blocking  with (nolock) ON DOWT.[blocking_session_id] = sp_blocking.[spid] 
+CROSS APPLY sys.[dm_exec_sql_text](sp_blocked.[sql_handle]) AS DEST_blocked 
+CROSS APPLY sys.[dm_exec_sql_text](sp_blocking.[sql_handle]) AS DEST_blocking

@@ -1,0 +1,29 @@
+select is_broker_enabled,* from sys.databases where is_broker_enabled =1
+select * from sys.transmission_queue --where to_service_name = 'NotifyServiceDDL'
+select * from sys.conversation_endpoints
+
+
+declare @conv uniqueidentifier
+set @conv = '00000000-0000-0000-0000-000000000000'
+declare @cmd1 nvarchar(2048)
+while(1 = 1)
+begin
+	select top 1 @conv = conversation_handle 	from sys.transmission_queue
+	where conversation_handle > @conv 	--and far_service = 'NotifyServiceDDL'
+	order by conversation_handle
+
+	if (@@rowcount = 0) break
+	SET @cmd1 = 'END CONVERSATION ''' + cast(@conv as varchar(36)) + ''' WITH CLEANUP'
+	PRINT @cmd1
+	exec(@cmd1)
+end
+
+
+
+select * from sys.event_notifications
+select * from sys.server_event_notifications
+DROP EVENT NOTIFICATION log_ddl ON DATABASE; 
+DROP EVENT NOTIFICATION log_server_ddl ON SERVER; 
+
+
+

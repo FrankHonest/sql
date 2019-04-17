@@ -1,0 +1,67 @@
+SELECT 'Deadlocks Occurrences Report'
+, CONVERT(BIGINT,((1.0 * p.cntr_value / NULLIF(datediff(DD,d.create_date,CURRENT_TIMESTAMP),0)))) as AveragePerDay
+, CAST(p.cntr_value AS NVARCHAR(100)) + ' deadlocks have been recorded since startup.' AS Details
+, d.create_date as StartupDateTime FROM sys.dm_os_performance_counters p INNER JOIN sys.databases d ON d.name = 'tempdb'
+WHERE RTRIM(p.counter_name) = 'Number of Deadlocks/sec' AND RTRIM(p.instance_name) = '_Total'
+
+
+
+/*=============EXTENDED EVENTS=======================*/
+DECLARE @LineFeedStr	       CHAR(2);
+DECLARE @versionNb			int;
+DECLARE @EventSessionName	       VARCHAR(256);
+DECLARE @tsql				NVARCHAR(MAX);
+DECLARE @DeadlockXMLLookup		VARCHAR(4000);
+ 
+SELECT	
+@versionNb		= (@@microsoftversion / 0x1000000) & 0xff,
+@LineFeedStr		= CHAR(13) + CHAR(10),
+@EventSessionName	= ISNULL(@EventSessionName,'system_health');
+ 
+IF (@versionNb = 10) 
+BEGIN
+SET @DeadlockXMLLookup = 
+'XEventData.XEvent.value(''(data/value)[1]'',''VARCHAR(MAX)'')';
+END;
+ELSE IF(@versionNb <= 9)
+BEGIN
+RAISERROR('Extended events feature does not exist in this version',12,1) 
+WITH NOWAIT;
+RETURN;
+END;	
+ELSE 
+BEGIN 
+SET @DeadlockXMLLookup = 'XEventData.XEvent.query(''(data/value/deadlock)[1]'')';
+END;
+ 
+SET @tsql = 'WITH DeadlockData' + @LineFeedStr + 
+		'AS (' + @LineFeedStr +
+		'    SELECT' + @LineFeedStr +
+		'	    CAST(target_data as xml) AS XMLData' + @LineFeedStr +
+		'    FROM' + @LineFeedStr +
+		'	    sys.dm_xe_session_targets st' + @LineFeedStr +
+		'    JOIN' + @LineFeedStr +
+		'	    sys.dm_xe_sessions s ' + @LineFeedStr +
+		'    ON s.address = st.event_session_address' + @LineFeedStr +
+		'    WHERE name   = ''' + 'system_health' + '''' + @LineFeedStr +
+		'    AND st.target_name = ''ring_buffer'' ' + @LineFeedStr +
+	')' + @LineFeedStr +
+		'SELECT ' + @LineFeedStr +
+		'    XEventData.XEvent.value(''@name'', ''varchar(128)'') as 
+eventName,' + @LineFeedStr +
+		'    XEventData.XEvent.value(''@timestamp'', ''datetime2'') as 
+eventDate,' + @LineFeedStr +
+		'    CAST(' + @DeadlockXMLLookup + ' AS XML) AS DeadLockGraph ' + 
+@LineFeedStr +
+		'FROM ' + @LineFeedStr +
+		'    DeadlockData' + @LineFeedStr +
+		'CROSS APPLY' + @LineFeedStr +
+		'    XMLData.nodes(''//RingBufferTarget/event'') AS XEventData 
+(XEvent)' + @LineFeedStr +
+		'WHERE' + @LineFeedStr +
+		'    XEventData.XEvent.value(''@name'',''varchar(4000)'') = 
+''xml_deadlock_report'''  + @LineFeedStr +
+		';'
+		;
+--EXEC sp_executesql @tsql;
+print @tsql

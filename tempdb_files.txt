@@ -1,0 +1,15 @@
+ALTER DATABASE tempdb   ADD FILE  (NAME = tempdb2,FILENAME = 'k:\TempDB\tempdb2.ndf',SIZE = 5MB, FILEGROWTH = 128MB  );
+ALTER DATABASE tempdb   ADD FILE  (NAME = tempdb3,FILENAME = 'k:\TempDB\tempdb3.ndf',SIZE = 5MB, FILEGROWTH = 128MB  );
+ALTER DATABASE tempdb   ADD FILE  (NAME = tempdb4,FILENAME = 'k:\TempDB\tempdb4.ndf',SIZE = 5MB, FILEGROWTH = 128MB  );
+ALTER DATABASE tempdb   ADD FILE  (NAME = tempdb5,FILENAME = 'k:\TempDB\tempdb5.ndf',SIZE = 5MB, FILEGROWTH = 128MB  );
+ALTER DATABASE tempdb   ADD FILE  (NAME = tempdb6,FILENAME = 'k:\TempDB\tempdb6.ndf',SIZE = 5MB, FILEGROWTH = 128MB  );
+ALTER DATABASE tempdb   ADD FILE  (NAME = tempdb7,FILENAME = 'k:\TempDB\tempdb7.ndf',SIZE = 5MB, FILEGROWTH = 128MB  );
+ALTER DATABASE tempdb   ADD FILE  (NAME = tempdb8,FILENAME = 'k:\TempDB\tempdb8.ndf',SIZE = 5MB, FILEGROWTH = 128MB  );
+
+
+USE master;  
+GO  
+ALTER DATABASE tempdb   MODIFY FILE (NAME = tempdev, FILENAME = 'E:\SQLData\tempdb.mdf');  
+GO  
+ALTER DATABASE  tempdb   MODIFY FILE (NAME = templog, FILENAME = 'E:\SQLData\templog.ldf');  
+GO  

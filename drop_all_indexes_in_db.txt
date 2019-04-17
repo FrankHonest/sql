@@ -1,0 +1,7 @@
+select case when objectproperty(object_id(i.name), 'IsConstraint') = 1
+then 'alter table ' + object_name(id) + ' drop constraint ' + i.name
+else 'drop index ' + object_name(id) + '.' + i.name end
+from sysindexes i
+where i.indid between 1 and 254 and objectproperty(id, 'IsUserTable') = 1
+and indexproperty (id, name, 'IsStatistics') = 0
+order by object_name(id), i.indid desc

@@ -1,0 +1,58 @@
+SELECT  @@Servername AS ServerName ,
+        d.Name AS DBName ,
+        b.backup_finish_date ,
+        bmf.physical_device_name,
+            CASE WHEN b.type ='D' THEN 'Full database'
+            WHEN b.type ='I' THEN 'Differential database' 
+            WHEN b.type ='L' THEN 'Log' 
+            WHEN b.type ='F' THEN 'File or filegroup' 
+            WHEN b.type ='G' THEN 'Differential file' 
+            WHEN b.type ='P' THEN 'Partial' 
+            WHEN b.type ='Q' THEN 'Differential partial' 
+            ELSE 'Unknown' END AS backup_type 
+        ,b.is_copy_only
+FROM    sys.databases d
+        INNER JOIN msdb..backupset b ON b.database_name = d.name
+                                        --AND b.[type] = 'D'
+        INNER JOIN msdb.dbo.backupmediafamily bmf ON b.media_set_id = bmf.media_set_id
+        WHERE b.database_name ='master'
+ORDER BY b.backup_finish_date DESC; 
+
+/*
+;WITH CTE_Backup AS
+(
+SELECT  database_name,backup_start_date,type,physical_device_name
+       ,Row_Number() OVER(PARTITION BY database_name,BS.type 
+        ORDER BY backup_start_date DESC) AS RowNum
+FROM    msdb..backupset BS
+JOIN    msdb.dbo.backupmediafamily BMF
+ON      BS.media_set_id=BMF.media_set_id
+)
+SELECT      @@servername as SQLInstanceName,D.name as DBName
+           ,ISNULL(CONVERT(VARCHAR,backup_start_date),'No backups') AS LastBackupType
+           ,D.recovery_model_desc
+           ,state_desc,
+            CASE WHEN type ='D' THEN 'Full database'
+            WHEN type ='I' THEN 'Differential database' 
+            WHEN type ='L' THEN 'Log' 
+            WHEN type ='F' THEN 'File or filegroup' 
+            WHEN type ='G' THEN 'Differential file' 
+            WHEN type ='P' THEN 'Partial' 
+            WHEN type ='Q' THEN 'Differential partial' 
+            ELSE 'Unknown' END AS backup_type 
+           ,physical_device_name
+FROM        sys.databases D
+LEFT JOIN   CTE_Backup CTE
+ON          D.name = CTE.database_name
+AND         RowNum = 1
+ORDER BY    D.name,type
+
+*/
+
+/*
+;WITH sel1 AS(SELECT @@Servername AS ServerName , d.Name AS DBName , MAX(b.backup_finish_date) AS LastBackupCompleted
+FROM sys.databases d LEFT OUTER JOIN msdb..backupset b ON b.database_name = d.name AND b.[type] = 'D' GROUP BY d.Name 
+) select DATABASEPROPERTYEX(sel1.DBName , 'Updateability' ), sel1.ServerName, sel1.DBName, sel1.LastBackupCompleted
+FROM sel1 WHERE DATABASEPROPERTYEX(sel1.DBName , 'Updateability' ) = 'READ_WRITE' 
+ORDER BY DBName
+*/

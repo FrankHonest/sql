@@ -1,0 +1,53 @@
+/*Orphaned user remediation script for SQL server 2000*/
+SET NOCOUNT ON
+IF OBJECT_ID('tempdb..#Results') IS NOT NULL DROP TABLE #Results;
+CREATE TABLE #Results
+(
+[DatabaseName] sysname COLLATE Latin1_General_CI_AS, 
+[OrphanedUser] sysname COLLATE Latin1_General_CI_AS,
+[Login] sysname NULL
+)
+
+DECLARE @DBName sysname		SET @DBName = ''
+DECLARE @Qry nvarchar(4000)	SET @Qry = ''
+
+
+WHILE @DBName IS NOT NULL
+BEGIN
+SET @DBName = 
+(
+SELECT MIN(name) 
+FROM master..sysdatabases 
+WHERE name NOT IN 
+(
+'master', 'model', 'tempdb', 'msdb', 
+'distribution', 'pubs', 'northwind'
+)
+AND DATABASEPROPERTY(name, 'IsOffline') = 0 
+AND DATABASEPROPERTY(name, 'IsSuspect') = 0 
+AND name > @DBName
+)
+
+IF @DBName IS NULL BREAK
+
+SET @Qry = ' SELECT ''' + @DBName + ''' AS [DatabaseName], 
+CAST(name AS sysname) COLLATE Latin1_General_CI_AS AS [OrphanedUser], 
+(SELECT name FROM master..sysxlogins S WHERE S.name COLLATE Latin1_General_CI_AS = su.name COLLATE Latin1_General_CI_AS) 
+COLLATE Latin1_General_CI_AS AS Login
+FROM ' + QUOTENAME(@DBName) + '..sysusers su
+WHERE su.islogin = 1 
+AND su.name NOT IN(''guest'',''dbo'') 
+AND NOT EXISTS(SELECT 1 FROM master..sysxlogins sl WHERE su.sid = sl.sid)'
+
+INSERT INTO #Results EXEC (@Qry)
+END
+
+SELECT SERVERPROPERTY('SERVERNAME') AS ServerName,*
+,CASE WHEN (OrphanedUser = 'dbo') and (Login IS NULL) THEN 'USE [' + DatabaseName + ']; EXEC sp_changedbowner ''sa'';' 
+WHEN (OrphanedUser IS not NULL) and (LOGIN IS NULL) THEN 'USE [' + DatabaseName + ']; EXEC sp_dropuser ''' + OrphanedUser + ''';' 
+WHEN (OrphanedUser IS not NULL) and (LOGIN IS NOT NULL) THEN 'USE [' + DatabaseName + 
+']; EXEC sp_change_users_login ''Update_One'',''' + OrphanedUser + ''','+Login+''';' 
+END  COLLATE Latin1_General_CI_AS as [remediation]
+FROM #Results 
+ORDER BY [DatabaseName], [OrphanedUser]
+IF OBJECT_ID('tempdb..#Results') IS NOT NULL DROP TABLE #Results;

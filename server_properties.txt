@@ -1,0 +1,14 @@
+
+SELECT 'Edition' AS Property, SERVERPROPERTY('Edition')  AS Value
+UNION SELECT 'ProductVersion', SERVERPROPERTY('ProductVersion') 
+UNION SELECT 'ProductLevel', SERVERPROPERTY('ProductLevel')
+UNION SELECT 'ComputerNamePhysicalNetBIOS', SERVERPROPERTY('ComputerNamePhysicalNetBIOS')
+UNION SELECT 'ServerName' , SERVERPROPERTY('ServerName')
+UNION SELECT 'MachineName', SERVERPROPERTY('MachineName')
+UNION SELECT 'InstanceName', SERVERPROPERTY('InstanceName') 
+UNION SELECT 'IsHadrEnabled', SERVERPROPERTY('IsHadrEnabled')
+UNION SELECT 'IsClustered', SERVERPROPERTY('IsClustered')
+UNION SELECT 'DomainName', DEFAULT_DOMAIN() 
+UNION SELECT 'local_net_address', CONNECTIONPROPERTY('local_net_address') 
+UNION SELECT 'local_tcp_port',CONNECTIONPROPERTY('local_tcp_port')
+UNION SELECT 'Version',@@VERSION

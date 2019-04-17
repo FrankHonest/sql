@@ -1,0 +1,18 @@
+--DBCC SQLPERF (N'waitstats')
+
+CREATE table #WS 
+(
+DatabaseName varchar(255),
+Requests float,
+WaitTime float,
+SignalWaitTime float)
+insert into #WS
+execute('DBCC SQLPERF (N''waitstats'')')
+
+select DatabaseName, CAST((Requests/1000)*WaitTime AS decimal(18,2)) AS Total,Requests,WaitTime,SignalWaitTime 
+from #WS
+ORDER BY Requests*WaitTime DESC
+
+
+
+DROP TABLE #WS

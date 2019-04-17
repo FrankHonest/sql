@@ -1,0 +1,29 @@
+select is_cdc_enabled, * from sys.databases
+
+USE TestDB1
+GO
+EXEC sys.sp_cdc_enable_db;
+
+EXEC sys.sp_cdc_enable_table @source_schema='dbo',	@source_name ='Table2', @role_name =NULL
+
+EXEC sys.sp_cdc_help_change_data_capture 
+
+--SELECT * FROM cdc.dbo_Table1_CT
+--SELECT * FROM cdc.dbo_Table2_CT
+
+
+
+DECLARE @from_lsn binary(10); 
+DECLARE @to_lsn binary(10);
+SET @from_lsn = sys.fn_cdc_map_time_to_lsn('smallest greater than', dateadd(n,-10,getdate()));
+SET @to_lsn = sys.fn_cdc_map_time_to_lsn('largest less than', getdate());
+select @from_lsn, @to_lsn
+--SET @from_lsn = sys.fn_cdc_get_min_lsn('dbo_Table2')
+--SET @to_lsn   = sys.fn_cdc_get_max_lsn()
+select @from_lsn, @to_lsn
+
+SELECT * FROM cdc.fn_cdc_get_all_changes_dbo_Table2(@from_lsn, @to_lsn, N'all');
+SELECT * FROM cdc.fn_cdc_get_net_changes_dbo_Table2(@from_lsn, @to_lsn, N'all');
+
+
+SELECT * FROM msdb.dbo.cdc_jobs
