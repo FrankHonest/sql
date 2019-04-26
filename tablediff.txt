@@ -1,0 +1,19 @@
+"C:\Program Files\Microsoft SQL Server\120\COM\tablediff.exe" -sourceserver SRV1 -sourcedatabase DB1 -sourcetable Table1 -destinationserver SRV2 -destinationdatabase DB2 -destinationtable Table2-et Difference -f d:\1\outputfile.sql
+
+
+SELECT DISTINCT  CAST(srv.srvname AS nvarchar(255)) AS Server1
+, CAST(a.publisher_db  AS nvarchar(255)) AS DB1
+, CAST(p.publication  AS nvarchar(255)) AS Publication
+, CAST(ss.srvname  AS nvarchar(255)) AS Server2 
+, CAST(s.subscriber_db  AS nvarchar(255)) AS DB2
+,'Incorrect subscription status' AS Reason
+,a.article AS Article
+, CAST(s.status AS nvarchar(255)) AS Status
+,'"C:\Program Files\Microsoft SQL Server\120\COM\tablediff.exe" -sourceserver '+srv.srvname+' -sourcedatabase '+a.publisher_db+' -sourcetable '+a.article+' -destinationserver '+ss.srvname+' -destinationdatabase '+s.subscriber_db+' -destinationtable '+a.article+' -et Difference -f d:\1\'+a.article+'.sql' AS TableDiff
+FROM distribution.dbo.MSarticles a  
+JOIN distribution.dbo.MSpublications p ON a.publication_id = p.publication_id 
+JOIN distribution.dbo.MSsubscriptions s ON p.publication_id = s.publication_id 
+JOIN master..sysservers ss ON s.subscriber_id = ss.srvid 
+JOIN master..sysservers srv ON srv.srvid = p.publisher_id 
+where s.status <> 2
+order by a.article
