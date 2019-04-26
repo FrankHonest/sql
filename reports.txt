@@ -1,0 +1,210 @@
+/*Logins To Expire report*/
+select CAST (SERVERPROPERTY('ServerName') AS nvarchar(255)) AS ServerName
+,cast(name as nvarchar(255)) AS LoginName
+,cast(LOGINPROPERTY(name,'DaysUntilExpiration') as int) AS DaysToExpire
+,case LOGINPROPERTY(name,'IsExpired') when 1 then 'YES' else 'NO' end  AS Expired
+,case LOGINPROPERTY(name,'IsLocked') when 1 then 'YES' else 'NO' end AS Locked
+,case LOGINPROPERTY(name,'IsMustChange') when 1 then 'YES' else 'NO' end  AS MustChangePassword
+FROM sys.syslogins 
+where LOGINPROPERTY(name,'DaysUntilExpiration') IS NOT NULL
+
+
+/*Log Shipping Desyncronization*/
+SET LOCK_TIMEOUT 120000; 
+SELECT CAST (SERVERPROPERTY('ServerName') AS nvarchar(255))  AS Field1,
+CAST (d.Name AS nvarchar(255)) AS Field2 , convert(nvarchar(255),MAX(b.backup_finish_date),120) AS Field3
+,NULL AS Field4,NULL AS Field5,NULL AS Field6,NULL AS Field7,NULL AS Field8,NULL AS Field9
+FROM sys.databases d LEFT OUTER JOIN msdb..backupset b ON b.database_name = d.name AND b.[type] = 'L' 
+where state_desc <> 'OFFLINE' and is_read_only=1 and is_in_standby=1 GROUP BY d.Name HAVING datediff(hh, MAX(b.backup_finish_date), getdate())>24
+
+
+/*Transactions long blocking*/
+SET LOCK_TIMEOUT 120000;
+SELECT DISTINCT CAST(SERVERPROPERTY('ServerName') AS nvarchar(255))  AS Field1
+,CAST(db_name(DTL.[resource_database_id]) AS nvarchar(255)) as Field2
+,CAST(DOWT.wait_duration_ms/1000/60 AS nvarchar(255)) as Field3
+,CAST(DOWT.session_id AS nvarchar(255)) AS Field4 
+,CAST(sp_blocked.[loginame] AS nvarchar(255)) AS Field5
+,SUBSTRING(convert(nvarchar(4000),DEST_blocked.[text]),1,255) AS Field6
+,CAST(DOWT.blocking_session_id AS nvarchar(255)) as Field7
+,CAST(sp_blocking.[loginame] AS nvarchar(255)) AS Field8
+,SUBSTRING(convert(nvarchar(4000),DEST_blocking.[text]),1,255) AS Field9
+FROM sys.dm_tran_locks DTL  with (nolock) 
+INNER JOIN sys.dm_os_waiting_tasks DOWT with (nolock) ON DTL.lock_owner_address = DOWT.resource_address    
+INNER JOIN sys.sysprocesses sp_blocked  with (nolock) ON DOWT.[session_id] = sp_blocked.[spid] 
+INNER JOIN sys.sysprocesses sp_blocking  with (nolock) ON DOWT.[blocking_session_id] = sp_blocking.[spid] 
+CROSS APPLY sys.[dm_exec_sql_text](sp_blocked.[sql_handle]) AS DEST_blocked 
+CROSS APPLY sys.[dm_exec_sql_text](sp_blocking.[sql_handle]) AS DEST_blocking
+WHERE DOWT.wait_duration_ms >600000
+
+
+
+/*Transmission queues*/
+DECLARE @temp TABLE(DB NVARCHAR(50),to_service_name nvarchar(50),[COUNT] INT)
+DECLARE @TableName NVARCHAR(50) 
+SELECT @TableName = 'sys.transmission_queue'
+
+	DECLARE @SQL NVARCHAR(MAX)
+	SELECT @SQL = STUFF((
+    	SELECT CHAR(13) + 'SELECT ''' + name + ''', to_service_name , ISNULL(COUNT(to_service_name),0) FROM [' + name + '].' + @TableName +'  WHERE (enqueue_time < getdate()-1) group by to_service_name '
+    	FROM sys.databases 
+    	WHERE is_broker_enabled=1 --AND OBJECT_ID(name + '.' + @TableName) IS NOT NULL
+AND DATABASEPROPERTYEX(name , 'Updateability' ) = 'READ_WRITE' 
+    	FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
+
+INSERT INTO @temp (DB, to_service_name, [COUNT])              
+EXEC sys.sp_executesql @SQL
+
+
+
+/*Database Status Report*/
+SELECT CAST (SERVERPROPERTY('ServerName') AS nvarchar(255)) AS ServerName, DB,to_service_name ,CAST([COUNT] AS nvarchar(25) )  AS [COUNT] FROM @temp
+SELECT CAST (SERVERPROPERTY('ServerName') AS nvarchar(255))  AS Field1, name AS Field2, 
+CAST(DATABASEPROPERTYEX(name, 'Status')AS nvarchar(255)) AS Field3, 
+CAST(DATABASEPROPERTYEX(name, 'Updateability')AS nvarchar(255))  AS Field4, 
+CAST(DATABASEPROPERTYEX(name, 'UserAccess') AS nvarchar(255)) AS Field5, 
+CASE DATABASEPROPERTYEX(name, 'IsInStandBy') WHEN 1 THEN 'YES' ELSE 'NO' END AS Field6, 
+NULL AS Field7, NULL AS Field8, NULL AS Field9
+FROM master.dbo.sysdatabases 
+WHERE DATABASEPROPERTYEX(name, 'UserAccess') <> 'MULTI_USER' OR DATABASEPROPERTYEX(name, 'Status') <> 'ONLINE'
+
+
+
+
+
+/*Replication Failed Subscriptions*/
+SET LOCK_TIMEOUT 120000; 
+select CAST(md.publisher AS nvarchar(255)) AS Field1
+,CAST(md.publisher_db AS nvarchar(255))  AS Field2
+,CAST(md.publication AS nvarchar(255)) AS Field3
+,REVERSE(SUBSTRING(REVERSE(mda.name),CHARINDEX('-',REVERSE(mda.name))+1,CHARINDEX('-',REVERSE(mda.name),CHARINDEX('-',REVERSE(mda.name))+1)-CHARINDEX('-',REVERSE(mda.name))-1))  AS Field4
+,CAST(mda.subscriber_db AS nvarchar(255))  AS Field5
+,CAST(md.agent_name AS nvarchar(255))  AS Field6
+,ISNULL(CAST(CAST(DATEDIFF(n, md.last_distsync, getdate())/60.0 AS decimal(18,2))  AS nvarchar(255)),'') AS Field7
+,CAST( (CASE  
+    WHEN md.status =  '1' THEN 'Start - '+cast(md.status as varchar)
+    WHEN md.status =  '2' THEN 'Succeed - '+cast(md.status as varchar)
+    WHEN md.status =  '3' THEN 'InProgress - '+cast(md.status as varchar)
+    WHEN md.status =  '4' THEN 'Idle - '+cast(md.status as varchar)
+    WHEN md.status =  '5' THEN 'Retry - '+cast(md.status as varchar)
+    WHEN md.status =  '6' THEN 'Fail - '+cast(md.status as varchar)
+    ELSE CAST(md.status AS VARCHAR)
+END) AS nvarchar(255)) AS Field8
+,CASE WHEN md.isagentrunningnow =1 THEN 'RUNNING' ELSE '' END   AS Field9
+from distribution.dbo.MSreplication_monitordata md
+LEFT JOIN distribution.dbo.MSdistribution_agents mda on mda.id = md.agent_id
+where publication_type = 0 and agent_type = 3 AND md.status in(5,6)
+UNION
+SELECT DISTINCT  CAST(srv.srvname AS nvarchar(255)) AS Field1
+, CAST(a.publisher_db  AS nvarchar(255)) AS Field2
+, CAST(p.publication  AS nvarchar(255)) AS Field3
+, CAST(ss.srvname  AS nvarchar(255)) AS Field4 
+, CAST(s.subscriber_db  AS nvarchar(255)) AS Field5
+,'Incorrect subscription status' AS Field6
+,'' AS Field7
+, CAST(s.status AS nvarchar(255)) AS Field8
+,'' AS Field9
+FROM distribution.dbo.MSarticles a  
+JOIN distribution.dbo.MSpublications p ON a.publication_id = p.publication_id 
+JOIN distribution.dbo.MSsubscriptions s ON p.publication_id = s.publication_id 
+JOIN master..sysservers ss ON s.subscriber_id = ss.srvid 
+JOIN master..sysservers srv ON srv.srvid = p.publisher_id 
+where s.status <> 2
+
+
+
+/*Long running jobs*/
+SET LOCK_TIMEOUT 120000;
+SELECT CAST(@@servername AS nvarchar(255)) as Field1
+	,CAST(j.name AS nvarchar(255)) as Field2
+	,CAST(j.description AS nvarchar(255)) as Field3
+	,CAST(jc.name AS nvarchar(255)) as Field4
+	,CAST(CAST( ISNULL(DATEDIFF(n, ja.start_execution_date, getdate())/60.0 ,0) AS decimal(18,2))  AS nvarchar(255)) AS Field5
+	,ISNULL(CONVERT(nvarchar(255),ja.start_execution_date ,120),'') AS Field6  
+    ,CAST(ISNULL(last_executed_step_id,0)+1 AS nvarchar(255)) as Field7, '' as Field8, '' as Field9
+FROM msdb.dbo.sysjobactivity ja 
+JOIN msdb.dbo.sysjobs j ON ja.job_id = j.job_id
+LEFT JOIN msdb.dbo.syscategories jc on jc.category_id = j.category_id
+WHERE (start_execution_date is not null AND stop_execution_date is null)
+AND ja.session_id = (SELECT TOP 1 session_id FROM msdb.dbo.syssessions ORDER BY agent_start_date DESC)
+AND jc.name NOT LIKE 'REPL%' and ISNULL(DATEDIFF(n, ja.start_execution_date, getdate())/60.0 ,0) > 5
+
+
+
+
+
+
+
+
+/*AON and FCI failovers*/
+SET LOCK_TIMEOUT 120000;
+DECLARE @FileName NVARCHAR(4000)
+SELECT @FileName = target_data.value('(EventFileTarget/File/@name)[1]','nvarchar(4000)')
+FROM ( SELECT CAST(target_data AS XML) target_data
+FROM sys.dm_xe_sessions s
+JOIN sys.dm_xe_session_targets t
+ON s.address = t.event_session_address
+WHERE s.name = N'AlwaysOn_health') ft
+declare @dt datetime
+SET @dt  = DATEADD(hh, -25, getdate())
+
+IF(@FileName IS NOT NULL)
+BEGIN
+WITH CTE AS(
+SELECT 
+CAST (XEData.value('(event/data[@name="availability_group_name"]/value)[1]', 'varchar(255)') AS nvarchar(255)) AS Field1,
+CAST (XEData.value('(event/data[@name="availability_replica_name"]/value)[1]', 'varchar(255)') AS nvarchar(255)) AS Field2,
+XEData.value('(event/@timestamp)[1]','datetime2(3)')  AS event_timestamp,
+CAST (XEData.value('(event/data[@name="previous_state"]/text)[1]', 'varchar(255)') AS nvarchar(255)) AS Field5,
+CAST (XEData.value('(event/data[@name="current_state"]/text)[1]', 'varchar(255)') AS nvarchar(255)) AS Field6
+FROM (
+SELECT CAST(event_data AS XML) XEData, *
+FROM sys.fn_xe_file_target_read_file(@FileName, NULL, NULL, NULL)
+WHERE object_name = 'availability_replica_state_change'
+) event_data
+--WHERE XEData.value('(event/data[@name="current_state"]/text)[1]', 'varchar(255)') = 'PRIMARY_NORMAL'
+)SELECT Field1, Field2, 
+'AOG event' AS Field3 ,
+CONVERT (nvarchar(255),DATEADD(hh, DATEDIFF (hh, GETUTCDATE(), GETDATE()), event_timestamp), 120) AS Field4,
+Field5, Field6, '' AS Field7, '' AS Field8, '' AS Field9 FROM CTE
+WHERE DATEADD(hh, DATEDIFF (hh, GETUTCDATE(), GETDATE()), event_timestamp) > @dt
+--ORDER BY event_timestamp DESC
+UNION
+	SELECT CAST (SERVERPROPERTY('ServerName') AS nvarchar(255)) AS Field1, 
+	CAST (SERVERPROPERTY('ComputerNamePhysicalNetBIOS') AS nvarchar(255))  AS Field2, 'Service startup' AS Field3, 
+	CONVERT (nvarchar(255),sqlserver_start_time, 120)  AS Field4, 
+	'' AS Field5, CASE WHEN SERVERPROPERTY('IsClustered') =1 THEN 'Running, Clustered' ELSE 'Running, Standalone' END AS Field6,
+	'' AS Field7, '' AS Field8, '' AS Field9
+	FROM sys.dm_os_sys_info where sqlserver_start_time > @dt
+END
+ELSE
+	SELECT CAST (SERVERPROPERTY('ServerName') AS nvarchar(255)) AS Field1, 
+	CAST (SERVERPROPERTY('ComputerNamePhysicalNetBIOS') AS nvarchar(255))  AS Field2, 'Service startup' AS Field3, 
+	CONVERT (nvarchar(255),sqlserver_start_time, 120)  AS Field4, 
+	'' AS Field5, CASE WHEN SERVERPROPERTY('IsClustered') =1 THEN 'Running, Clustered' ELSE 'Running, Standalone' END AS Field6,
+	'' AS Field7, '' AS Field8, '' AS Field9
+	FROM sys.dm_os_sys_info where sqlserver_start_time > @dt
+
+
+
+
+/*suspect pages*/
+SET LOCK_TIMEOUT 120000;
+select CAST (SERVERPROPERTY('ServerName') AS nvarchar(255))  AS Field1
+,CAST (d.name AS nvarchar(255))  AS Field2
+,CAST ( sp.file_id AS nvarchar(255))  AS Field3
+,CAST (mf.physical_name AS nvarchar(255))  AS Field4
+,CAST (sp.page_id AS nvarchar(255))  AS Field5
+,CAST (case when sp.event_type = 1 then '823 or 824 error other than a bad checksum or a torn page'
+            when sp.event_type = 2 then 'Bad checksum'
+            when sp.event_type = 3 then 'Torn Page'
+            when sp.event_type = 4 then 'Restored (The page was restored after it was marked bad)'
+            when sp.event_type = 5 then 'Repaired (DBCC repaired the page)'
+            when sp.event_type = 7 then 'Deallocated by DBCC'
+       end AS nvarchar(255))  AS Field6
+,CAST (sp.error_count AS nvarchar(255))  AS Field7
+,CAST (sp.last_update_date AS nvarchar(255))  AS Field8
+,' '  AS Field9
+from msdb.dbo.suspect_pages sp
+inner join sys.databases d on d.database_id=sp.database_id
+inner join sys.master_files mf on mf.database_id=sp.database_id and mf.file_id=sp.file_id
