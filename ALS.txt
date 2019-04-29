@@ -1,0 +1,2136 @@
+USE [msdb]
+GO
+
+/****** Object:  Table [dbo].[als_dest_databases]    Script Date: 4/26/2019 7:45:30 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+SET ANSI_PADDING ON
+GO
+
+CREATE TABLE [dbo].[als_dest_databases](
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+	[DB] [sysname] NOT NULL,
+	[SharePath] [varchar](255) NULL,
+	[LogPath] [varchar](255) NULL,
+	[StandbyFile] [varchar](255) NULL
+) ON [PRIMARY]
+
+GO
+
+SET ANSI_PADDING OFF
+GO
+
+/****** Object:  Table [dbo].[als_dest_databases_drp]    Script Date: 4/26/2019 7:45:30 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+SET ANSI_PADDING ON
+GO
+
+CREATE TABLE [dbo].[als_dest_databases_drp](
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+	[DB] [sysname] NOT NULL,
+	[SharePath] [varchar](255) NULL,
+	[LogPath] [varchar](255) NULL,
+	[StandbyFile] [varchar](255) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+
+GO
+
+SET ANSI_PADDING OFF
+GO
+
+/****** Object:  Table [dbo].[als_files_delivered]    Script Date: 4/26/2019 7:45:30 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+SET ANSI_PADDING ON
+GO
+
+CREATE TABLE [dbo].[als_files_delivered](
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+	[DB] [sysname] NOT NULL,
+	[FileName] [varchar](255) NOT NULL,
+	[LogFileName] [varchar](1000) NOT NULL,
+	[Date] [datetime] NULL CONSTRAINT [DF_als_files_delivered_Date]  DEFAULT (getdate()),
+	[RecoveryForkID] [uniqueidentifier] NULL,
+	[FirstLSN] [numeric](25, 0) NULL,
+	[LastLSN] [numeric](25, 0) NULL,
+	[Status] [int] NULL CONSTRAINT [DF_als_files_delivered_Status]  DEFAULT ((0)),
+	[IsCopied]  AS (CONVERT([bit],case [Status]&(1) when (1) then (1) else (0) end,0)),
+	[IsExtracted]  AS (CONVERT([bit],case [Status]&(2) when (2) then (1) else (0) end,0)),
+	[IsRestored]  AS (CONVERT([bit],case [Status]&(4) when (4) then (1) else (0) end,0)),
+	[IsDeleted]  AS (CONVERT([bit],case [Status]&(8) when (8) then (1) else (0) end,0)),
+	[IsError]  AS (CONVERT([bit],case [Status]&(16) when (16) then (1) else (0) end,0)),
+	[IsCopying]  AS (CONVERT([bit],case [Status]&(32) when (32) then (1) else (0) end,0)),
+	[DBID] [int] NOT NULL,
+ CONSTRAINT [PK_als_files_delivered] PRIMARY KEY CLUSTERED 
+(
+	[DBID] ASC,
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON)
+)
+
+GO
+
+SET ANSI_PADDING OFF
+GO
+
+/****** Object:  Table [dbo].[als_files_delivered_errors]    Script Date: 4/26/2019 7:45:30 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+SET ANSI_PADDING ON
+GO
+
+CREATE TABLE [dbo].[als_files_delivered_errors](
+	[ID] [int] NOT NULL,
+	[Date] [datetime] NULL CONSTRAINT [DF_als_files_delivered_errors_Date]  DEFAULT (getdate()),
+	[Error] [varchar](8000) NULL
+) ON [PRIMARY]
+
+GO
+
+SET ANSI_PADDING OFF
+GO
+
+/****** Object:  Table [dbo].[als_parameters]    Script Date: 4/26/2019 7:45:30 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[als_parameters](
+	[DaysBeforeDelete] [tinyint] NULL
+) ON [PRIMARY]
+
+GO
+
+
+/*
+==============================================================================
+=============================================================================
+*/
+
+USE [msdb]
+GO
+
+/****** Object:  StoredProcedure [dbo].[als_get_files]    Script Date: 4/26/2019 7:45:55 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROCEDURE [dbo].[als_get_files] @DB sysname AS
+BEGIN
+
+-- ????????? ????????? ? ???????????????? LOG - ?????? ?? ??????? - ?????????
+-- @DB - ??? ???? ??????
+-- EXEC als_get_files 'WBDPP02M'
+-- DECLARE @DB sysname
+-- SET @DB = 'VMPP08F'
+
+	SET NOCOUNT ON
+
+	CREATE TABLE #T (
+		ID int IDENTITY(1,1) NOT NULL,
+		FileName varchar(255),
+		PRIMARY KEY CLUSTERED(ID)
+	)
+
+	CREATE TABLE #E (
+		ID int IDENTITY(1,1) NOT NULL,
+		Error varchar(8000),
+		PRIMARY KEY CLUSTERED(ID)
+	)
+
+	CREATE TABLE #backup_header
+	(
+		BackupName varchar(128),
+		BackupDescription varchar(256),
+		BackupType int, 
+		ExpirationDate datetime NULL,
+		Compressed int,
+		Position int,
+		DeviceType int,
+		UserName varchar(128),
+		ServerName varchar(128),
+		DatabaseName varchar(128),
+		DatabaseVersion int,
+		DatabaseCreationDate datetime,
+		BackupSize numeric(20,0) NULL,
+		FirstLSN numeric(25,0) NULL,
+		LastLSN numeric(25,0) NULL,
+		CheckpointLSN numeric(25,0) NULL,
+		DatabaseBackupLSN numeric(25,0) NULL,
+		BackupStartDate datetime,
+		BackupFinishDate datetime,
+		SortOrder int,
+		CodePage int,
+		UnicodeLocaleId int,
+		UnicodeComparisonStyle int,
+		CompatibilityLevel int,
+		SoftwareVendorId int,
+		SoftwareVersionMajor int,
+		SoftwareVersionMinor int,
+		SoftwareVersionBuild int,
+		MachineName varchar(128),
+		Flags int NULL,
+		BindingId uniqueidentifier NULL,
+		RecoveryForkID uniqueidentifier NULL,
+		Collation varchar(128) null,
+		FamilyGUID uniqueidentifier NULL,
+		HasBulkLoggedData int,
+		IsSnapshot int,
+		IsReadOnly int,
+		IsSingleUser int,
+		HasBackupChecksums int,
+		IsDamaged int,
+		BeginsLogChain int,
+		HasIncompleteMetaData int,
+		IsForceOffline int,
+		IsCopyOnly int,
+		FirstRecoveryForkID uniqueidentifier NULL,
+		ForkPointLSN  numeric(25,0) NULL,
+		RecoveryModel varchar(60),
+		DifferentialBaseLSN numeric(25,0) NULL,
+		DifferentialBaseGUID uniqueidentifier NULL,
+		BackupTypeDescription varchar(60),
+		BackupSetGUID uniqueidentifier NULL,
+		CompressedBackupSize bigint,
+		Containment tinyint,
+		KeyAlgorithm nvarchar(32) NULL,
+		EncryptorThumbprint varbinary(20) NULL,
+		EncryptorType nvarchar(32) NULL
+
+	)
+
+	DECLARE 
+		@cmd varchar(1000),
+		@ID int,
+		@EID int,
+		@FileName varchar(255),
+		@FileNameExt varchar(255),
+		@LogFileName varchar(1000),
+		@ArhFileName varchar(1000),
+		@IsCopied bit,
+		@IsExtracted bit,
+		@ret int,
+		@Error varchar(8000),
+		@ErrorStr varchar(1000),
+		@RecoveryForkID uniqueidentifier,
+		@FirstLSN numeric(25,0),
+		@LastLSN numeric(25,0),
+		@SharePath varchar(255), 
+		@LogPath varchar(255), 
+		@MaxVolumeSizeKB int,
+		@IsCopying bit,
+		@DBID int,
+		@Date datetime,
+		@PrevID int,
+		@LSN varchar(22),
+		@fLSN varchar(22),
+		@PrevLSN varchar(22)
+
+	SELECT @DBID = ID FROM als_dest_databases WHERE DB = @DB
+
+	SELECT
+		@LogPath = LogPath,
+		@SharePath = SharePath
+	FROM
+		als_dest_databases
+	WHERE
+		DB = @DB
+
+	IF @@ROWCOUNT = 0
+	BEGIN
+		RAISERROR('Database not configured. Please run als_init_destination', 11 ,-1)
+		RETURN
+	END
+
+	SET @cmd = 'dir ' + @SharePath + '*.TRN /B' 
+	
+	INSERT INTO #T(FileName)
+	EXEC @ret = master..xp_cmdshell @cmd
+
+	IF @ret <> 0
+	BEGIN
+		RAISERROR('Error occured while accessing remote server', 11, -1)
+		RETURN @ret
+	END
+
+	-- ???????? ???????? ?????? ??? ????? ????
+	update als_files_delivered
+	set Status = 0
+	where RecoveryForkID is NULL
+	and IsExtracted = 1
+	AND IsRestored = 0
+	
+	-- ???????? ???????? ?????? ??? ????????? ????
+	DECLARE @count int
+
+	set @count = (select count(1) from msdb.dbo.als_files_delivered where DB = @DB AND IsRestored = 0) + 1
+
+	if @count > 1
+	begin
+		IF NOT OBJECT_ID('tempdb..#tmp') IS NULL drop table #tmp
+		CREATE TABLE #tmp(
+			ID int,
+			FileName sysname,
+			FirstLSN varchar(22),
+			LastLSN varchar(22))
+		
+		set @cmd = 'INSERT #tmp select top ' + cast(@count as VARCHAR(5)) + ' ID, FileName, FirstLSN, LastLSN from msdb.dbo.als_files_delivered where DB = ''' + @DB + ''' ORDER BY FileName DESC'
+		exec (@cmd)
+
+		SELECT @ID = 0,
+			@FileName = '',
+			@LSN = NULL,
+			@fLSN = NULL
+
+		WHILE (1 = 1)
+		begin
+			SELECT @PrevID = @ID,
+				@PrevLSN = @LSN
+
+			select top 1 @ID = ID,
+				@LSN = LastLSN,
+				@fLSN = FirstLSN,
+				@FileName = FileName
+			from #tmp
+			where @FileName < FileName
+			order by FileName
+
+			if @@ROWCOUNT = 0 break;
+
+			if @PrevLSN is null
+				CONTINUE
+
+			if @PrevLSN <> @fLSN
+				UPDATE als_files_delivered 
+				SET Status = 0,
+					FirstLSN = NULL,
+					LastLSN = NULL,
+					RecoveryForkID = NULL
+				WHERE ID = @PrevID
+		end
+	end
+
+	INSERT INTO als_files_delivered(
+		DB, 
+		FileName, 
+		LogFileName,
+		DBID)
+	SELECT
+		@DB,
+		LTRIM(RTRIM(FileName)),
+		@LogPath + LEFT(LTRIM(RTRIM(FileName)), LEN(LTRIM(RTRIM(FileName))) - 3) + 'TRN',
+		@DBID
+	FROM
+		#T
+	WHERE
+		UPPER(RIGHT(LTRIM(RTRIM(FileName)), 4)) = '.TRN' AND
+		LTRIM(RTRIM(FileName)) NOT IN (SELECT FileName FROM als_files_delivered WHERE DB = @DB)
+	ORDER BY
+		#T.ID
+
+	SET @ID = -1
+	WHILE 1=1
+	BEGIN
+		SELECT TOP 1
+			@ID = ID,
+			@FileName = FileName,
+			@LogFileName = LogFileName,
+			@IsCopied = IsCopied,
+			@IsExtracted = IsExtracted,
+			@IsCopying = IsCopying
+		FROM
+			als_files_delivered
+		WHERE
+			DB = @DB AND
+			ID > @ID AND
+			IsDeleted = 0 AND
+			(IsCopied = 0 OR IsExtracted = 0)
+		ORDER BY
+			ID
+
+		IF @@ROWCOUNT = 0 BREAK
+
+		SET @ret = 0
+		SET @FileNameExt = LEFT(LTRIM(RTRIM(@FileName)), LEN(LTRIM(RTRIM(@FileName))) - 3) + '*'		
+
+		IF @IsCopied = 0
+		BEGIN
+			IF @IsCopying = 0
+			BEGIN
+				SET @cmd = 'copy ' + @SharePath + @FileNameExt + ' ' + @LogPath + ' /Y /Z'
+				UPDATE 
+					als_files_delivered
+				SET 
+					Status = Status | 32
+				WHERE
+					ID = @ID
+
+				SET @IsCopying = 1
+			END ELSE
+				SET @cmd = 'copy ' + @SharePath + @FileNameExt + ' ' + @LogPath + ' /-y /Z'
+
+			TRUNCATE TABLE #E
+			INSERT INTO #E(Error)
+			EXEC @ret = master.dbo.xp_cmdshell @cmd
+
+			IF @ret = 0
+			BEGIN
+				UPDATE
+					als_files_delivered
+				SET
+					Status = (Status & (~32)) | 1
+				WHERE
+					ID = @ID
+
+				SET @IsCopied = 1
+				SET @IsCopying = 0
+			END ELSE
+				RAISERROR('Cannot copy one of the files %s', 11, -1, @FileNameExt)
+		END
+
+		IF @ret = 0 AND @IsExtracted = 0
+		BEGIN
+			TRUNCATE TABLE #backup_header
+			SET @cmd = 'RESTORE HEADERONLY FROM DISK = ''' + @LogFileName + '''' 
+			INSERT INTO #backup_header
+			EXECUTE(@cmd)
+
+			SELECT TOP 1 
+				@RecoveryForkID = ISNULL(RecoveryForkID, 0x01),
+				@FirstLSN = ISNULL(FirstLSN, 0),
+				@LastLSN = ISNULL(LastLSN, 0),
+				@Date = ISNULL(BackupStartDate, GETDATE())
+			FROM 
+				#backup_header
+
+			UPDATE
+				als_files_delivered
+			SET
+				RecoveryForkID = @RecoveryForkID,
+				FirstLSN = @FirstLSN,
+				LastLSN = @LastLSN,
+				Date = @Date,
+				Status = Status | 2
+			WHERE
+				ID = @ID
+
+			SET @IsExtracted = 1
+		END
+		
+		IF @ret <> 0
+		BEGIN
+			SET @EID = -1
+			SET @Error = ''
+
+			WHILE 1=1
+			BEGIN
+				SELECT TOP 1
+					@EID = ID,
+					@ErrorStr = Error
+				FROM
+					#E
+				WHERE
+					ID > @EID
+				ORDER BY
+					ID
+
+				IF @@ROWCOUNT = 0 BREAK
+
+				IF LEN(@Error) + LEN(@ErrorStr) < 7990
+					SET @Error = @Error + @ErrorStr + '
+'
+				ELSE
+					BREAK
+			END
+
+			IF ISNULL(@Error, '') <> ''
+			BEGIN
+				INSERT INTO als_files_delivered_errors (
+					ID,
+					Error)
+				VALUES (
+					@ID,
+					@Error)
+	
+				UPDATE 
+					als_files_delivered
+				SET
+					Status = Status | 16
+				WHERE
+					ID = @ID
+			END
+
+			TRUNCATE TABLE #E
+		END
+	END
+
+	DROP TABLE #T
+	DROP TABLE #E
+	DROP TABLE #backup_header
+
+	IF @ret IS NULL
+		SET @ret = 0
+
+	IF @ret <> 0
+		RAISERROR('Error.', 11, -1)
+
+	RETURN @ret
+END
+
+GO
+
+/****** Object:  StoredProcedure [dbo].[als_init]    Script Date: 4/26/2019 7:45:55 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+----------------------------------------------------------------------------------------------------
+
+CREATE PROCEDURE [dbo].[als_init] 
+	@DaysBeforeDelete tinyint = 14 AS
+BEGIN
+-- ????????????? ALS. ?????? ??????????? ????? ??????? ?????.
+-- @DaysBeforeDelete - ?????????? ????, ?? ?????????? ??????? ????? ?????????. 0 - ????? ?? ?????????
+-- EXEC als_init
+
+	SET NOCOUNT ON
+
+	DELETE FROM als_parameters
+
+	INSERT INTO als_parameters(
+		DaysBeforeDelete)
+	VALUES (
+		@DaysBeforeDelete)
+END
+
+GO
+
+/****** Object:  StoredProcedure [dbo].[als_init_destination]    Script Date: 4/26/2019 7:45:55 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE PROCEDURE [dbo].[als_init_destination]
+	@DB sysname,
+	@SharePath varchar(255),
+	@LogPath varchar(255), 
+	@StandbyFile varchar(255)
+AS
+BEGIN	
+/*
+	????????????? ALS ?? ??????? - ????????? ??? ???????? ???? ??????
+
+	@DB - ??? ??????????? ?????????? ???? ?????? 
+	@SharePath - ???? ? shared catalog ?? ??????? - ?????????, ??? ???????? ???????????????? LOG - ?????
+	@LogPath - ???? ? ????????, ? ??????? ????? ????????? ?????????? LOG - ?????
+	@StandbyFile - ???????? ??? STANDBY ????? ??? ???????? RESTORE, ?????? - ??? ???????? ?? + '.TUF'
+
+	EXEC als_init_destination 
+		'WBDPP02M', 
+		'\\ARHLMK\LogArh\', 
+		'F:\LogTrn\', 
+		'WBDPP02M.tuf'
+*/
+	SET NOCOUNT ON
+
+	DECLARE
+		@cmd varchar(255),
+		@Data sysname,
+		@Log sysname,
+		@ID int
+
+	IF EXISTS (SELECT 1 FROM als_dest_databases WHERE DB = @DB)
+	BEGIN
+		RAISERROR('Another database with the same name exists. Abort.', 11, -1)
+		RETURN
+	END
+
+	SET @LogPath = LTRIM(RTRIM(@LogPath))
+
+	IF RIGHT(@LogPath, 1) <> '\'
+		SET @LogPath = @LogPath + '\'
+	
+	IF CHARINDEX('\', @StandbyFile) = 0
+		SET @StandbyFile = @LogPath + @StandbyFile
+
+	IF EXISTS (SELECT 1 FROM als_dest_databases WHERE DB <> @DB AND SharePath = @SharePath)
+	BEGIN
+		RAISERROR('Another database with the same SharePath exists. Abort.', 11, -1)
+		RETURN
+	END
+
+	INSERT INTO als_dest_databases(
+		DB, 
+		LogPath,
+		SharePath,
+		StandbyFile)
+	VALUES(
+		@DB, 
+		@LogPath,
+		@SharePath, 
+		@StandbyFile)
+END
+
+GO
+
+/****** Object:  StoredProcedure [dbo].[als_restore]    Script Date: 4/26/2019 7:45:55 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE   PROCEDURE [dbo].[als_restore] @DB sysname AS BEGIN
+-- ????????? ?????????????? ???? ?????? ?? ??????? - ?????????
+-- @DB - ??? ???? ??????
+-- EXEC als_restore 'KTD04F'
+
+	SET NOCOUNT ON
+
+	DECLARE 
+		@ID int,
+		@FileName varchar(255),
+		@LogFileName varchar(1000),
+		@res int,
+		@db_recovery_fork_id0 uniqueidentifier,
+		@db_recovery_fork_id1 uniqueidentifier,
+		@db_backup_lsn numeric(25,0),
+		@backup_recovery_fork_id uniqueidentifier,
+		@lsn_slot int,
+		@lsn_block int,
+		@lsn_file int,
+		@cmd varchar(255),
+		@ret int,
+		@StandbyFile varchar(255),
+		@SPID int,
+		@IsErr int,
+		@nCount int,
+		@DaysBeforeDelete tinyint,
+		@EID int,
+		@Error varchar(8000),
+		@ErrorStr varchar(1000),
+		@rCount int,
+		@FirstLSN numeric(25, 0),
+		@alsID int,
+		@DBID int
+
+
+	SET @rCount = 0
+
+	SELECT
+		@DaysBeforeDelete = DaysBeforeDelete
+	FROM
+		als_parameters
+
+	IF @@ROWCOUNT = 0
+	BEGIN
+		RAISERROR('ALS not configured. Please run als_init', 11 ,-1)
+		RETURN
+	END
+
+	CREATE TABLE #E (
+		ID int IDENTITY(1,1) NOT NULL,
+		Error varchar(8000),
+		PRIMARY KEY CLUSTERED(ID)
+	)
+
+	CREATE TABLE #db_info
+	(
+		ParentObject varchar(128),
+		Object       varchar(128),
+		Field        varchar(128),
+		Value        varchar(7000)
+	)
+
+	SELECT
+		@StandbyFile = StandbyFile,
+		@DBID = ID
+	FROM
+		als_dest_databases
+	WHERE
+		DB = @DB
+
+	IF @@ROWCOUNT = 0
+	BEGIN
+		RAISERROR('???? ?? ???????', 11, -1)
+		RETURN
+	END
+
+	SET @FileName = ''
+
+	SET @cmd = 'DBCC DBINFO(''' + @DB + ''') WITH TABLERESULTS'
+	INSERT INTO #db_info
+	EXECUTE (@cmd)
+
+	SELECT TOP 1 
+		@db_recovery_fork_id0 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00),
+		@db_recovery_fork_id1 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00)
+	FROM
+		#db_info
+	WHERE
+		Object = 'dbi_recoveryForkNameStack' AND 
+		Field = 'm_guid'
+
+	SELECT TOP 1 
+		@db_recovery_fork_id0 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00)
+	FROM
+		#db_info
+	WHERE
+		Object = 'dbi_recoveryForkNameStack' AND 
+		Field = 'm_guid'
+
+	SELECT
+		@db_recovery_fork_id1 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00)
+	FROM
+		#db_info
+	WHERE
+		Object = 'dbi_recoveryForkNameStack' AND 
+		Field = 'm_guid'
+
+	SELECT 
+		@db_backup_lsn = m.redo_start_lsn
+	FROM
+		sys.databases d 
+	INNER JOIN 
+		sys.master_files m
+	ON 
+		d.database_id = m.database_id AND
+		m.type = 0 
+	WHERE d.name = @DB
+
+	UPDATE
+		als_files_delivered
+	SET
+		Status = Status | 4
+	WHERE
+		DBID = @DBID AND
+		(RecoveryForkID = @db_recovery_fork_id0 OR RecoveryForkID = @db_recovery_fork_id1) AND
+		LastLSN <= @db_backup_lsn AND
+		IsRestored = 0
+
+	UPDATE
+		als_files_delivered
+	SET
+		Status = Status | 16
+	WHERE
+		DBID = @DBID AND
+		IsCopied = 1 AND
+		IsExtracted = 1 AND
+		IsRestored = 0 AND
+		IsDeleted = 0 AND
+		RecoveryForkID <> @db_recovery_fork_id0 AND 
+		RecoveryForkID <> @db_recovery_fork_id1
+
+	INSERT INTO	als_files_delivered_errors (
+		ID,
+		Error)
+	SELECT
+		ID,
+		'Invalid RecoveryForkID'
+	FROM
+		als_files_delivered
+	WHERE
+		DBID = @DBID AND
+		IsCopied = 1 AND
+		IsExtracted = 1 AND
+		IsRestored = 0 AND
+		IsDeleted = 0 AND
+		RecoveryForkID <> @db_recovery_fork_id0 AND 
+		RecoveryForkID <> @db_recovery_fork_id1
+
+	IF @@ROWCOUNT > 0 
+	BEGIN
+		RAISERROR('Some files had invalid ForkID', 11, -1)
+		SET @IsErr = 1
+	END ELSE
+		SET @IsErr = 0
+		
+	SET @SPID = -1
+	WHILE 1=1
+	BEGIN
+		SELECT TOP 1
+			@SPID = spid
+		FROM 
+			master.dbo.sysprocesses
+		WHERE
+			dbid = DB_ID(@DB) AND
+			spid > @SPID
+		ORDER BY
+			spid
+
+		IF @@ROWCOUNT = 0 BREAK
+
+		SET @cmd = 'KILL ' + LTRIM(STR(@SPID)) 		EXEC(@cmd)
+	END
+
+	SET @nCount = 0
+	SET @ID = -1
+
+	DECLARE @t TABLE (
+		ID int NOT NULL IDENTITY(1,1),
+		alsID int,
+		LogFileName varchar(1000),
+		FirstLSN numeric(25, 0),
+		PRIMARY KEY CLUSTERED (ID))
+
+
+	INSERT INTO @t(alsID, LogFileName, FirstLSN)
+	SELECT
+		ID,
+		LogFileName,
+		FirstLSN
+	FROM
+		als_files_delivered
+	WHERE
+		DBID = @DBID AND
+		(RecoveryForkID = @db_recovery_fork_id0 OR RecoveryForkID = @db_recovery_fork_id1) AND
+		IsRestored = 0 AND
+		IsDeleted = 0 AND
+		ID > @ID
+	ORDER BY
+		LastLSN,
+		FirstLSN
+
+	WHILE 1=1
+	BEGIN
+		SELECT TOP 1
+			@ID = ID,
+			@alsID = alsID,
+			@LogFileName = LogFileName,
+			@FirstLSN = FirstLSN
+		FROM
+			@t
+		WHERE
+			ID > @ID
+		ORDER BY
+			ID
+
+		IF @@ROWCOUNT = 0 BREAK
+
+		SET @nCount = @nCount + 1
+
+		RESTORE LOG @DB
+		FROM DISK = @LogFileName
+		WITH STANDBY = @StandbyFile
+
+		SET @ret = @@ERROR
+
+		IF @ret <> 0
+		BEGIN
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status | 16
+			WHERE
+				ID = @alsID
+
+			INSERT INTO	als_files_delivered_errors (
+				ID,
+				Error)
+			VALUES (
+				@alsID,
+				'Error ' + STR(@ret))
+
+			IF @rCount > 0
+				SET @ret = 0
+
+--			BREAK
+		END ELSE BEGIN
+			SET @rCount = @rCount + 1
+
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status & (~16) | 4
+			WHERE
+				ID = @alsID
+
+--SOD 18.01.2004. ??????????? ???? RESTORED ?? ?????? ? ???????, ?? ? ? ???? ?????????? ???????
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status & (~16) | 4
+			WHERE
+				DBID = @DBID AND
+				FirstLSN < @FirstLSN AND
+				(RecoveryForkID = @db_recovery_fork_id0 OR RecoveryForkID = @db_recovery_fork_id1) AND
+				IsRestored = 0 AND
+				IsDeleted = 0
+
+--SOD 18.01.2004. ??????????? ???? RESTORED ? ???? ??????? ? ?????? ForkID
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status & (~16) | 4
+			WHERE
+				DBID = @DBID AND
+				RecoveryForkID <> @db_recovery_fork_id0 AND 
+				RecoveryForkID <> @db_recovery_fork_id1 AND
+				IsRestored = 0 AND
+				IsDeleted = 0
+		END
+	END
+
+	DROP TABLE #db_info
+
+-- ??????? ?????? ?????
+
+	IF ISNULL(@DaysBeforeDelete, 0) > 0
+	BEGIN
+		SET @ID = -1
+		WHILE 1=1
+		BEGIN
+			SELECT TOP 1
+				@ID = ID,
+				@LogFileName = LogFileName
+			FROM
+				als_files_delivered
+			WHERE
+				DBID = @DBID AND
+				ID > @ID AND
+				IsDeleted = 0 AND
+				IsExtracted = 1 AND
+				IsRestored = 1 AND
+				Date < DATEADD(dd, -@DaysBeforeDelete, GETDATE())
+			ORDER BY
+				ID
+	
+			IF @@ROWCOUNT = 0 BREAK
+	
+			SET @ret = 0
+	
+			SET @cmd = 'if exist ' + @LogFileName + ' del ' + @LogFileName
+
+			TRUNCATE TABLE #E
+
+			INSERT INTO #E (Error)
+			EXEC @ret = master.dbo.xp_cmdshell @cmd
+	
+			IF @ret = 0
+			BEGIN
+				UPDATE
+					als_files_delivered
+				SET
+					Status = Status | 8
+				WHERE
+					ID = @ID
+			END ELSE BEGIN
+				SET @EID = -1
+				SET @Error = ''
+	
+				WHILE 1=1
+				BEGIN
+					SELECT TOP 1
+						@EID = ID,
+						@ErrorStr = Error
+					FROM
+						#E
+					WHERE
+						ID > @EID
+					ORDER BY
+						ID
+	
+					IF @@ROWCOUNT = 0 BREAK
+	
+					IF LEN(@Error) + LEN(@ErrorStr) < 7990
+						SET @Error = @Error + @ErrorStr + '
+	'
+					ELSE
+						BREAK
+				END
+
+				IF ISNULL(@Error, '') <> ''
+				BEGIN
+					UPDATE
+						als_files_delivered
+					SET
+						Status = Status | 16
+					WHERE
+						ID = @ID
+		
+					INSERT INTO	als_files_delivered_errors (
+						ID,
+						Error)
+					VALUES (
+						@ID,
+						'Error ' + STR(@ret))
+				END
+			END
+		END
+	END
+
+	IF @ret IS NULL
+		SET @ret = 0
+
+	IF @ret <> 0
+		RAISERROR('Error.', 11, -1)
+	ELSE BEGIN
+		IF @nCount = 0
+		BEGIN
+			IF @IsErr = 1
+			BEGIN
+				RAISERROR('????????? ?????? ? ?? ?????? ????? ?? ???? ?????????????.', 11, -1)
+				SET @ret = 1
+			END ELSE BEGIN
+				RAISERROR('??????? ?? ????, ?? ?? ?????? ????? ?? ???? ?????????????.', 11, -1)
+				SET @ret = 0
+			END
+		END 
+	END
+
+	RETURN @ret
+END
+
+GO
+
+/****** Object:  StoredProcedure [dbo].[als_restore_norecovery]    Script Date: 4/26/2019 7:45:55 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE   PROCEDURE [dbo].[als_restore_norecovery] @DB sysname AS BEGIN
+-- ????????? ?????????????? ???? ?????? ?? ??????? - ?????????
+-- @DB - ??? ???? ??????
+-- EXEC als_restore 'KTD04F'
+
+	SET NOCOUNT ON
+
+	DECLARE 
+		@ID int,
+		@FileName varchar(255),
+		@LogFileName varchar(1000),
+		@res int,
+		@db_recovery_fork_id0 uniqueidentifier,
+		@db_recovery_fork_id1 uniqueidentifier,
+		@db_backup_lsn numeric(25,0),
+		@backup_recovery_fork_id uniqueidentifier,
+		@lsn_slot int,
+		@lsn_block int,
+		@lsn_file int,
+		@cmd varchar(255),
+		@ret int,
+		@StandbyFile varchar(255),
+		@SPID int,
+		@IsErr int,
+		@nCount int,
+		@DaysBeforeDelete tinyint,
+		@EID int,
+		@Error varchar(8000),
+		@ErrorStr varchar(1000),
+		@rCount int,
+		@FirstLSN numeric(25, 0),
+		@alsID int
+
+	SET @rCount = 0
+
+	SELECT
+		@DaysBeforeDelete = DaysBeforeDelete
+	FROM
+		als_parameters
+
+	IF @@ROWCOUNT = 0
+	BEGIN
+		RAISERROR('ALS not configured. Please run als_init',11,-1)
+		RETURN
+	END
+
+	CREATE TABLE #E (
+		ID int IDENTITY(1,1) NOT NULL,
+		Error varchar(8000),
+		PRIMARY KEY CLUSTERED(ID)
+	)
+
+	CREATE TABLE #db_info
+	(
+		ParentObject varchar(128),
+		Object       varchar(128),
+		Field        varchar(128),
+		Value        varchar(7000)
+	)
+
+	SELECT
+		@StandbyFile = StandbyFile
+	FROM
+		als_dest_databases
+	WHERE
+		DB = @DB
+
+	IF @@ROWCOUNT = 0
+	BEGIN
+		RAISERROR('???? ?? ???????',11,-1)
+		RETURN
+	END
+
+	SET @FileName = ''
+
+	SET @cmd = 'DBCC DBINFO(''' + @DB + ''') WITH TABLERESULTS'
+	INSERT INTO #db_info
+	EXECUTE (@cmd)
+
+	SELECT TOP 1 
+		@db_recovery_fork_id0 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00),
+		@db_recovery_fork_id1 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00)
+	FROM
+		#db_info
+	WHERE
+		Object = 'dbi_recoveryForkNameStack' AND 
+		Field = 'm_guid'
+
+	SELECT TOP 1 
+		@db_recovery_fork_id0 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00)
+	FROM
+		#db_info
+	WHERE
+		Object = 'dbi_recoveryForkNameStack' AND 
+		Field = 'm_guid'
+
+	SELECT
+		@db_recovery_fork_id1 = ISNULL(CONVERT(uniqueidentifier, Value), 0x00)
+	FROM
+		#db_info
+	WHERE
+		Object = 'dbi_recoveryForkNameStack' AND 
+		Field = 'm_guid'
+
+	SELECT 
+		@db_backup_lsn = m.redo_start_lsn
+	FROM
+		sys.databases d 
+	INNER JOIN 
+		sys.master_files m
+	ON 
+		d.database_id = m.database_id AND
+		m.type = 0 
+	WHERE d.name = @DB
+
+	UPDATE
+		als_files_delivered
+	SET
+		Status = Status | 4
+	WHERE
+		DB = @DB AND
+		(RecoveryForkID = @db_recovery_fork_id0 OR RecoveryForkID = @db_recovery_fork_id1) AND
+		LastLSN <= @db_backup_lsn AND
+		IsRestored = 0
+
+	UPDATE
+		als_files_delivered
+	SET
+		Status = Status | 16
+	WHERE
+		DB = @DB AND
+		IsCopied = 1 AND
+		IsExtracted = 1 AND
+		IsRestored = 0 AND
+		IsDeleted = 0 AND
+		RecoveryForkID <> @db_recovery_fork_id0 AND 
+		RecoveryForkID <> @db_recovery_fork_id1
+
+	INSERT INTO	als_files_delivered_errors (
+		ID,
+		Error)
+	SELECT
+		ID,
+		'Invalid RecoveryForkID'
+	FROM
+		als_files_delivered
+	WHERE
+		DB = @DB AND
+		IsCopied = 1 AND
+		IsExtracted = 1 AND
+		IsRestored = 0 AND
+		IsDeleted = 0 AND
+		RecoveryForkID <> @db_recovery_fork_id0 AND 
+		RecoveryForkID <> @db_recovery_fork_id1
+
+	IF @@ROWCOUNT > 0 
+	BEGIN
+		RAISERROR('Some files had invalid ForkID',11,-1)
+		SET @IsErr = 1
+	END ELSE
+		SET @IsErr = 0
+		
+	SET @SPID = -1
+	WHILE 1=1
+	BEGIN
+		SELECT TOP 1
+			@SPID = spid
+		FROM 
+			master.dbo.sysprocesses
+		WHERE
+			dbid = DB_ID(@DB) AND
+			spid > @SPID
+		ORDER BY
+			spid
+
+		IF @@ROWCOUNT = 0 BREAK
+
+		SET @cmd = 'KILL ' + LTRIM(STR(@SPID)) 		EXEC(@cmd)
+	END
+
+	SET @nCount = 0
+	SET @ID = -1
+
+	DECLARE @t TABLE (
+		ID int NOT NULL IDENTITY(1,1),
+		alsID int,
+		LogFileName varchar(1000),
+		FirstLSN numeric(25, 0),
+		PRIMARY KEY CLUSTERED (ID))
+
+
+	INSERT INTO @t(alsID, LogFileName, FirstLSN)
+	SELECT
+		ID,
+		LogFileName,
+		FirstLSN
+	FROM
+		als_files_delivered
+	WHERE
+		DB = @DB AND
+		(RecoveryForkID = @db_recovery_fork_id0 OR RecoveryForkID = @db_recovery_fork_id1) AND
+		IsRestored = 0 AND
+		IsDeleted = 0 AND
+		ID > @ID
+	ORDER BY
+		LastLSN,
+		FirstLSN
+
+	WHILE 1=1
+	BEGIN
+		SELECT TOP 1
+			@ID = ID,
+			@alsID = alsID,
+			@LogFileName = LogFileName,
+			@FirstLSN = FirstLSN
+		FROM
+			@t
+		WHERE
+			ID > @ID
+		ORDER BY
+			ID
+
+		IF @@ROWCOUNT = 0 BREAK
+
+		SET @nCount = @nCount + 1
+
+		RESTORE LOG @DB
+		FROM DISK = @LogFileName
+		WITH NORECOVERY
+
+		SET @ret = @@ERROR
+
+		IF @ret <> 0
+		BEGIN
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status | 16
+			WHERE
+				ID = @alsID
+
+			INSERT INTO	als_files_delivered_errors (
+				ID,
+				Error)
+			VALUES (
+				@alsID,
+				'Error ' + STR(@ret))
+
+			IF @rCount > 0
+				SET @ret = 0
+
+--			BREAK
+		END ELSE BEGIN
+			SET @rCount = @rCount + 1
+
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status & (~16) | 4
+			WHERE
+				ID = @alsID
+
+--SOD 18.01.2004. ??????????? ???? RESTORED ?? ?????? ? ???????, ?? ? ? ???? ?????????? ???????
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status & (~16) | 4
+			WHERE
+				DB = @DB AND
+				FirstLSN < @FirstLSN AND
+				(RecoveryForkID = @db_recovery_fork_id0 OR RecoveryForkID = @db_recovery_fork_id1) AND
+				IsRestored = 0 AND
+				IsDeleted = 0
+
+--SOD 18.01.2004. ??????????? ???? RESTORED ? ???? ??????? ? ?????? ForkID
+			UPDATE
+				als_files_delivered
+			SET
+				Status = Status & (~16) | 4
+			WHERE
+				DB = @DB AND
+				RecoveryForkID <> @db_recovery_fork_id0 AND 
+				RecoveryForkID <> @db_recovery_fork_id1 AND
+				IsRestored = 0 AND
+				IsDeleted = 0
+		END
+	END
+
+	DROP TABLE #db_info
+
+-- ??????? ?????? ?????
+
+	IF ISNULL(@DaysBeforeDelete, 0) > 0
+	BEGIN
+		SET @ID = -1
+		WHILE 1=1
+		BEGIN
+			SELECT TOP 1
+				@ID = ID,
+				@LogFileName = LogFileName
+			FROM
+				als_files_delivered
+			WHERE
+				DB = @DB AND
+				ID > @ID AND
+				IsDeleted = 0 AND
+				IsExtracted = 1 AND
+				IsRestored = 1 AND
+				Date < DATEADD(dd, -@DaysBeforeDelete, GETDATE())
+			ORDER BY
+				ID
+	
+			IF @@ROWCOUNT = 0 BREAK
+	
+			SET @ret = 0
+
+			SET @cmd = 'if exist ' + @LogFileName + ' del ' + @LogFileName
+
+			TRUNCATE TABLE #E
+
+			INSERT INTO #E (Error)
+			EXEC @ret = master.dbo.xp_cmdshell @cmd
+	
+			IF @ret = 0
+			BEGIN
+				UPDATE
+					als_files_delivered
+				SET
+					Status = Status | 8
+				WHERE
+					ID = @ID
+			END ELSE BEGIN
+				SET @EID = -1
+				SET @Error = ''
+	
+				WHILE 1=1
+				BEGIN
+					SELECT TOP 1
+						@EID = ID,
+						@ErrorStr = Error
+					FROM
+						#E
+					WHERE
+						ID > @EID
+					ORDER BY
+						ID
+	
+					IF @@ROWCOUNT = 0 BREAK
+	
+					IF LEN(@Error) + LEN(@ErrorStr) < 7990
+						SET @Error = @Error + @ErrorStr + '
+	'
+					ELSE
+						BREAK
+				END
+
+				IF ISNULL(@Error, '') <> ''
+				BEGIN
+					UPDATE
+						als_files_delivered
+					SET
+						Status = Status | 16
+					WHERE
+						ID = @ID
+		
+					INSERT INTO	als_files_delivered_errors (
+						ID,
+						Error)
+					VALUES (
+						@ID,
+						'Error ' + STR(@ret))
+				END
+			END
+		END
+	END
+
+	IF @ret IS NULL
+		SET @ret = 0
+
+	IF @ret <> 0
+		RAISERROR('Error.',11,-1)
+	ELSE BEGIN
+		IF @nCount = 0
+		BEGIN
+			IF @IsErr = 1
+			BEGIN
+				RAISERROR('????????? ?????? ? ?? ?????? ????? ?? ???? ?????????????.',11,-1)
+				SET @ret = 1
+			END ELSE BEGIN
+				RAISERROR('??????? ?? ????, ?? ?? ?????? ????? ?? ???? ?????????????.',11,-1)
+				SET @ret = 0
+			END
+		END 
+	END
+
+	RETURN @ret
+END
+
+GO
+
+
+
+
+
+
+/*
+====================================================================
+====================================================================
+*/
+
+USE [msdb]
+GO
+
+/****** Object:  Job [ALS_GetMirrorsStats]    Script Date: 4/26/2019 7:47:30 PM ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [Log Shipping]    Script Date: 4/26/2019 7:47:30 PM ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'Log Shipping' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'Log Shipping'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'ALS_GetMirrorsStats', 
+		@enabled=1, 
+		@notify_level_eventlog=0, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'No description available.', 
+		@category_name=N'Log Shipping', 
+		@owner_login_name=N'sa', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [GetStats]    Script Date: 4/26/2019 7:47:30 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'GetStats', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'EXEC GetMirrorsStats', 
+		@database_name=N'BICons', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'every 2 min day', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=4, 
+		@freq_subday_interval=2, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20150303, 
+		@active_end_date=99991231, 
+		@active_start_time=150000, 
+		@active_end_time=180000, 
+		@schedule_uid=N'7c3d5285-2d2c-4253-9687-8332ef2ee7e3'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'every 2 min night', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=4, 
+		@freq_subday_interval=2, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20150303, 
+		@active_end_date=99991231, 
+		@active_start_time=10000, 
+		@active_end_time=40000, 
+		@schedule_uid=N'203dbf27-b4be-4f56-ace6-9763a024b6fe'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+
+GO
+
+/****** Object:  Job [ALS_Get_AMKPP08F]    Script Date: 4/26/2019 7:47:31 PM ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [Log Shipping]    Script Date: 4/26/2019 7:47:31 PM ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'Log Shipping' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'Log Shipping'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'ALS_Get_AMKPP08F', 
+		@enabled=1, 
+		@notify_level_eventlog=2, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'No description available.', 
+		@category_name=N'Log Shipping', 
+		@owner_login_name=N'sa', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [als_get_files]    Script Date: 4/26/2019 7:47:31 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'als_get_files', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=1, 
+		@retry_interval=15, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'EXEC als_get_files ''AMKPP08F''', 
+		@database_name=N'msdb', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirAll_ALS_Get_10min_40min', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=4, 
+		@freq_subday_interval=30, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20040428, 
+		@active_end_date=99991231, 
+		@active_start_time=1000, 
+		@active_end_time=235959, 
+		@schedule_uid=N'b6dce87e-160e-4ae1-a10b-82b202e52269'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+
+GO
+
+/****** Object:  Job [ALS_Restore_AMKPP08F]    Script Date: 4/26/2019 7:47:31 PM ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [Log Shipping]    Script Date: 4/26/2019 7:47:31 PM ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'Log Shipping' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'Log Shipping'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'ALS_Restore_AMKPP08F', 
+		@enabled=1, 
+		@notify_level_eventlog=2, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'No description available.', 
+		@category_name=N'Log Shipping', 
+		@owner_login_name=N'sa', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [als_restore]    Script Date: 4/26/2019 7:47:31 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'als_restore', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=3, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=1, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'EXEC als_restore ''AMKPP08F''', 
+		@database_name=N'msdb', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [als_restore next]    Script Date: 4/26/2019 7:47:31 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'als_restore next', 
+		@step_id=2, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'EXEC als_restore ''AMKPP08F''', 
+		@database_name=N'msdb', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirFirst_ALS_Restore_0100', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20140401, 
+		@active_end_date=99991231, 
+		@active_start_time=10000, 
+		@active_end_time=235959, 
+		@schedule_uid=N'6dc9e3b6-da60-45bc-816b-d87259284b77'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirFirst_ALS_Restore_1530', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20140401, 
+		@active_end_date=99991231, 
+		@active_start_time=153000, 
+		@active_end_time=235959, 
+		@schedule_uid=N'9985a1b1-f2aa-4bd1-8417-89869e1ee3f1'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirSecond_ALS_Restore_0500', 
+		@enabled=0, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20140401, 
+		@active_end_date=99991231, 
+		@active_start_time=50000, 
+		@active_end_time=235959, 
+		@schedule_uid=N'992c1273-1365-45c6-84ab-9c83c8b14307'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirSecond_ALS_Restore_1830', 
+		@enabled=0, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20140401, 
+		@active_end_date=99991231, 
+		@active_start_time=183000, 
+		@active_end_time=235959, 
+		@schedule_uid=N'706d9472-0835-4d0d-8214-08884bec75e4'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+
+GO
+
+/****** Object:  Job [Mirrors Job Enabled Status]    Script Date: 4/26/2019 7:47:31 PM ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [Backup Jobs]    Script Date: 4/26/2019 7:47:31 PM ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'Backup Jobs' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'Backup Jobs'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'Mirrors Job Enabled Status', 
+		@enabled=1, 
+		@notify_level_eventlog=0, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'No description available.', 
+		@category_name=N'Backup Jobs', 
+		@owner_login_name=N'sa', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [Report]    Script Date: 4/26/2019 7:47:31 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'Report', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'DECLARE @SendMailReport int,
+		@SendMailTo varchar(255)
+
+SET	@SendMailReport = 1
+SET	@SendMailTo = ''administrators-mssql@mail.ru;Sergey.Orlov.Contractor@mail.ru''
+
+IF (@SendMailReport = 1 AND LEN(REPLACE(@SendMailTo, '' '', '''')) > 0)
+BEGIN
+	IF EXISTS(SELECT 1 FROM msdb.dbo.sysjobs WHERE name LIKE ''ALS_%'' AND enabled = 0)
+	BEGIN
+		EXEC msdb.dbo.sp_send_dbmail 
+			@recipients = @SendMailTo,
+			@subject = ''????? ?????????????? ?????????'',
+			@query = ''SELECT CAST(name AS VARCHAR(20)) as name, enabled FROM msdb.dbo.sysjobs WHERE name LIKE ''''ALS_%'''' AND enabled = 0 ORDER BY name'',
+			@exclude_query_output = 1
+	END
+END
+', 
+		@database_name=N'msdb', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'Hour', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=8, 
+		@freq_subday_interval=1, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20090624, 
+		@active_end_date=99991231, 
+		@active_start_time=0, 
+		@active_end_time=235959, 
+		@schedule_uid=N'81553e0a-66fc-48fb-b453-302427408dc8'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+
+GO
+
+/****** Object:  Job [Mirrors Log Load Status]    Script Date: 4/26/2019 7:47:31 PM ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [Log Shipping]    Script Date: 4/26/2019 7:47:31 PM ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'Log Shipping' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'Log Shipping'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'Mirrors Log Load Status', 
+		@enabled=1, 
+		@notify_level_eventlog=0, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'No description available.', 
+		@category_name=N'Log Shipping', 
+		@owner_login_name=N'sa', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [Report]    Script Date: 4/26/2019 7:47:31 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'Report', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'DECLARE @SendMailReport int,
+		@SendMailTo varchar(255)
+
+SET	@SendMailReport = 1
+SET	@SendMailTo = ''administrators-mssql@mail.ru;Sergey.Orlov.Contractor@mail.ru''
+
+IF (@SendMailReport = 1 AND LEN(REPLACE(@SendMailTo, '' '', '''')) > 0)
+BEGIN
+	IF NOT OBJECT_ID(''tempdb..##T1543'') IS NULL DROP TABLE ##T1543
+
+	SELECT  CAST(LEFT(REPLACE(d.SharePath, ''\\'', ''''), CHARINDEX(''\'', d.SharePath, 3) - 3) as VARCHAR(20)) as ServerName,
+			CAST(d.DB as VARCHAR(20)) as DBName,
+			max(f.Date) as DateLastLog
+	INTO ##T1543
+	FROM msdb.dbo.als_dest_databases d INNER JOIN msdb.dbo.als_files_delivered f ON 
+					d.DB = f.DB AND f.IsCopied = 1 AND f.IsExtracted = 1
+		INNER JOIN (SELECT DB, max(LastLSN) as LastLSN FROM msdb.dbo.als_files_delivered GROUP BY DB) z ON
+					f.DB = z.DB AND f.LastLSN = z.LastLSN
+	GROUP BY d.SharePath, d.DB, f.LastLSN
+	HAVING max(f.Date) < DATEADD(hh, -2, GETDATE())
+	ORDER BY d.SharePath, d.DB
+
+	IF EXISTS(SELECT 1 FROM ##T1543)
+	BEGIN
+		EXEC msdb.dbo.sp_send_dbmail 
+			@recipients = @SendMailTo,
+			@subject = ''???????? ? ???????? ?????'',
+			@query = ''SELECT * FROM ##T1543'',
+			@exclude_query_output = 1
+	END
+
+	DROP TABLE ##T1543
+END
+', 
+		@database_name=N'master', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'Hour', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=8, 
+		@freq_subday_interval=1, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20090624, 
+		@active_end_date=99991231, 
+		@active_start_time=0, 
+		@active_end_time=235959, 
+		@schedule_uid=N'81553e0a-66fc-48fb-b453-302427408dc8'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+
+GO
+
+/****** Object:  Job [Mirrors Status]    Script Date: 4/26/2019 7:47:31 PM ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [Log Shipping]    Script Date: 4/26/2019 7:47:31 PM ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'Log Shipping' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'Log Shipping'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'Mirrors Status', 
+		@enabled=1, 
+		@notify_level_eventlog=0, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'No description available.', 
+		@category_name=N'Log Shipping', 
+		@owner_login_name=N'sa', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [Report]    Script Date: 4/26/2019 7:47:31 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'Report', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'DECLARE @SendMailReport int,
+		@SendMailTo varchar(1024)
+
+IF (SELECT object_id(''tempdb..##T'')) IS NOT NULL	DROP TABLE ##T
+CREATE TABLE ##T(DB varchar(16),
+					Broken varchar(1),
+					NotActual varchar(1),
+					MirrorDate datetime)
+
+SET	@SendMailReport = 1
+SET	@SendMailTo = ''administrators-mssql@mail.ru;Sergey.Orlov.Contractor@mail.ru''
+
+IF (@SendMailReport = 1 AND LEN(REPLACE(@SendMailTo, '' '', '''')) > 0)
+BEGIN
+
+	INSERT ##T(DB, Broken, NotActual, MirrorDate)
+	SELECT 	a.DB, 
+			CASE WHEN (max(b.status) & 1024 = 1024 AND max(b.status) & 2097152 = 2097152)
+				 THEN ''N'' 
+				 ELSE ''Y''
+			END,
+			CASE WHEN (Datepart(year, max(t.backup_finish_date)) =
+									Datepart(year, Getdate()) and
+									Datepart(dayofyear, max(t.backup_finish_date)) =
+									Datepart(dayofyear, Getdate()))
+				 THEN ''N''
+				 ELSE ''Y''
+			END,
+			max(t.backup_finish_date)
+	FROM 
+		msdb.dbo.als_dest_databases a 
+		LEFT JOIN master.dbo.sysdatabases b ON a.DB = b.name
+		LEFT JOIN msdb.dbo.backupset t ON a.DB = t.database_name AND t.type = ''L''
+	GROUP BY a.DB
+
+	IF EXISTS(SELECT 1 FROM ##T WHERE NotActual = ''Y'' OR Broken = ''Y'')
+	BEGIN
+		EXEC msdb.dbo.sp_send_dbmail 
+			@recipients = @SendMailTo,
+			@subject = ''???????? ? ?????????'',
+			@query = ''SELECT * FROM ##T WHERE NotActual = ''''Y'''' OR Broken = ''''Y'''''',
+			@exclude_query_output = 1
+	END
+END
+
+DROP TABLE ##T', 
+		@database_name=N'msdb', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirFirst_MirReport_0505', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20090220, 
+		@active_end_date=99991231, 
+		@active_start_time=50500, 
+		@active_end_time=235959, 
+		@schedule_uid=N'f726f911-636a-4850-b14e-f09215b6df21'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirSecond_MirReport_0905', 
+		@enabled=0, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20140401, 
+		@active_end_date=99991231, 
+		@active_start_time=90500, 
+		@active_end_time=235959, 
+		@schedule_uid=N'1ea74b00-157d-48d1-87ea-a75fc8179a8a'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+
+GO
+
+/****** Object:  Job [Mirrors Status Mail]    Script Date: 4/26/2019 7:47:31 PM ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [Log Shipping]    Script Date: 4/26/2019 7:47:31 PM ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'Log Shipping' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'Log Shipping'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'Mirrors Status Mail', 
+		@enabled=1, 
+		@notify_level_eventlog=0, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'No description available.', 
+		@category_name=N'Log Shipping', 
+		@owner_login_name=N'sa', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [Report]    Script Date: 4/26/2019 7:47:31 PM ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'Report', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'DECLARE @SendMailReport int,
+	@SendMailTo varchar(1024),
+	@Subject varchar(255)
+
+IF (SELECT object_id(''tempdb..##T'')) IS NOT NULL	DROP TABLE ##T
+CREATE TABLE ##T(DB varchar(16),
+					Broken varchar(1),
+					NotActual varchar(1),
+					MirrorDate datetime)
+
+SET	@SendMailReport = 1
+SET	@SendMailTo = ''administrators-mssql@mail.ru;Sergey.Orlov.Contractor@mail.ru; GusevAM@wbd.ru; AdminsERPBI@mail.ru; OracleBIreports@mail.ru'' 
+
+IF (@SendMailReport = 1 AND LEN(REPLACE(@SendMailTo, '' '', '''')) > 0)
+BEGIN
+
+	INSERT ##T(DB, Broken, NotActual, MirrorDate)
+	SELECT 	a.DB, 
+			CASE WHEN (max(b.status) & 1024 = 1024 AND max(b.status) & 2097152 = 2097152)
+				 THEN ''N'' 
+				 ELSE ''Y''
+			END,
+			CASE WHEN (Datepart(year, max(t.backup_finish_date)) =
+									Datepart(year, Getdate()) and
+									Datepart(dayofyear, max(t.backup_finish_date)) =
+									Datepart(dayofyear, Getdate()))
+				 THEN ''N''
+				 ELSE ''Y''
+			END,
+			max(t.backup_finish_date)
+	FROM 
+		msdb.dbo.als_dest_databases a 
+		LEFT JOIN master.dbo.sysdatabases b ON a.DB = b.name
+		LEFT JOIN msdb.dbo.backupset t ON a.DB = t.database_name AND t.type = ''L''
+	GROUP BY a.DB
+
+	IF EXISTS(SELECT 1 FROM ##T WHERE NotActual = ''Y'' OR Broken = ''Y'')
+		SET @Subject = ''Failed. ?????????? ?????????? ??????''
+	ELSE
+		SET @Subject = ''OK. ?????????? ?????????? ??????''
+
+	EXEC msdb.dbo.sp_send_dbmail 
+		@recipients = @SendMailTo,
+		@subject = @Subject,
+		@query = ''SELECT * FROM ##T ORDER BY Broken, NotActual, DB'',
+		@exclude_query_output = 1
+END
+
+DROP TABLE ##T', 
+		@database_name=N'msdb', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirFirst_MirReportMail_0220', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20090220, 
+		@active_end_date=99991231, 
+		@active_start_time=22000, 
+		@active_end_time=235959, 
+		@schedule_uid=N'53664f16-923e-4ce8-bfea-f59b16f5ff1d'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'MirSecond_Mir_ReportMail_0620', 
+		@enabled=0, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20140401, 
+		@active_end_date=99991231, 
+		@active_start_time=62000, 
+		@active_end_time=235959, 
+		@schedule_uid=N'1e3dbdf8-0ad1-4f32-9f46-b13ad2a75ffd'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+
+GO
+
+
